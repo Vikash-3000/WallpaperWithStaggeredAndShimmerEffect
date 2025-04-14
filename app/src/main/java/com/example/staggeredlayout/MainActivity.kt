@@ -2,13 +2,19 @@ package com.example.staggeredlayout
 
 import android.os.Bundle
 import android.util.Log
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
@@ -19,25 +25,44 @@ class MainActivity : AppCompatActivity() {
     private val imageUrls = mutableListOf<WallpaperItem>()
 
     private var isLoading = false
-    private var currentPage = 1
+
+    private var currentPageWalli = 1
+    private var currentPageFeature = 1
+    private var currentPagePopular = 1
+    private var currentPageWallhaven = 1
+
+    private val apiKey = "HSsQUq456pp0SZejuuR17dkAAmdJ9Vi3"
+
+    private val lastPages = mapOf(
+        "recent" to 194,
+        "featured" to 10,
+        "popular" to 1240,
+        "wallhaven" to 8333
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContentView(R.layout.activity_main)
+
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
 
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
         recyclerView = findViewById(R.id.recyclerView)
 
         setupRecyclerView()
         setupSwipeToRefresh()
-        loadImages() // Load first batch of images
+        loadImages()
     }
 
     private fun setupRecyclerView() {
         val layoutManager = StaggeredGridLayoutManager(2, StaggeredGridLayoutManager.VERTICAL).apply {
-            gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE // ✅ Prevents shifting gaps
+            gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_NONE
         }
-
         recyclerView.layoutManager = layoutManager
         recyclerView.setHasFixedSize(true)
         recyclerView.setItemViewCacheSize(25)
@@ -73,7 +98,9 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val images = fetchWallpapers()
-                updateList(images)
+                imageUrls.clear()
+                imageUrls.addAll(images)
+                adapter.notifyDataSetChanged()
             } catch (e: Exception) {
                 Log.e("MainActivity", "Error fetching images: ${e.message}")
             } finally {
@@ -89,9 +116,11 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                currentPage++
+                incrementPages()
                 val newImages = fetchWallpapers()
-                updateList(imageUrls + newImages)
+                val oldSize = imageUrls.size
+                imageUrls.addAll(newImages)
+                adapter.notifyItemRangeInserted(oldSize, newImages.size)
             } catch (e: Exception) {
                 Log.e("MainActivity", "Error loading more images: ${e.message}")
             } finally {
@@ -104,10 +133,21 @@ class MainActivity : AppCompatActivity() {
         val imageList = mutableListOf<WallpaperItem>()
 
         try {
-            val response = RetrofitClient.walliApi.getWallpapers("recent", currentPage)
-            response.forEach { image ->
+            // Fetching "recent", "featured", and "popular" pages using current page trackers
+            val recentResponse = RetrofitClient.walliApi.getWallpapers("recent", currentPageWalli)
+            val featureResponse = RetrofitClient.walliApi.getWallpapers("feature", currentPageFeature)
+            val popularResponse = RetrofitClient.walliApi.getWallpapers("popular", currentPagePopular)
+
+            recentResponse.forEach { image ->
                 imageList.add(WallpaperItem(image.downloadLinks.original, null, null))
             }
+            featureResponse.forEach { image ->
+                imageList.add(WallpaperItem(image.downloadLinks.original, null, null))
+            }
+            popularResponse.forEach { image ->
+                imageList.add(WallpaperItem(image.downloadLinks.original, null, null))
+            }
+
         } catch (e: Exception) {
             Log.e("MainActivity", "API Fetch Failed: ${e.message}")
         }
@@ -116,18 +156,20 @@ class MainActivity : AppCompatActivity() {
         return@withContext imageList
     }
 
-    private fun updateList(newList: List<WallpaperItem>) {
-        val diffCallback = WallpaperDiffCallback(imageUrls, newList)
-        val diffResult = DiffUtil.calculateDiff(diffCallback)
-        imageUrls.clear()
-        imageUrls.addAll(newList)
-        diffResult.dispatchUpdatesTo(adapter)
-    }
 
     private fun refreshImages() {
         swipeRefreshLayout.isRefreshing = true
-        currentPage = 1
+        currentPageWalli = 1
+        currentPageFeature = 1
+        currentPagePopular = 1
+        currentPageWallhaven = 1
         loadImages()
     }
-}
 
+    private fun incrementPages() {
+        currentPageWalli = (currentPageWalli % lastPages["recent"]!!) + 1
+        currentPageFeature = (currentPageFeature % lastPages["featured"]!!) + 1
+        currentPagePopular = (currentPagePopular % lastPages["popular"]!!) + 1
+        currentPageWallhaven = (currentPageWallhaven % lastPages["wallhaven"]!!) + 1
+    }
+}
